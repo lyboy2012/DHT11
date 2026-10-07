@@ -44,7 +44,7 @@ static const uint8_t DHT_PIN = 4;        // DHT11 DATA 脚 -> GPIO 4
 static const uint8_t LED_PIN = 2;         // 板载 LED: GPIO 2（多数 ESP32 开发板如此）
 static const bool LED_ACTIVE_HIGH = true; // 高电平点亮; 板载 LED 亮灭相反就改为 false
 
-static const uint32_t READ_INTERVAL_MS = 2000;   // 采样间隔下限(实际取 max(它, 传感器物理下限))
+static const uint32_t READ_INTERVAL_MS = 5000;   // 采样间隔下限(实际取 max(它, 传感器物理下限))
 static const uint32_t STARTUP_DELAY_MS = 1200;   // 上电后 DHT11 需要约 1s 稳定，首次采样往后推
 static const uint32_t LED_OK_FLASH_MS = 50;      // 成功读数: 亮 50ms
 static const uint32_t LED_FAIL_HALF_MS = 100;    // 失败告警: 亮100/灭100
