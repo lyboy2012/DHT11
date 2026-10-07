@@ -11,12 +11,13 @@
 namespace {
 
 // 字体（均已确认存在于 U8g2 2.36.18）：
-//   wqy12_t_gb2312 : 点阵中文，显示「温度 / 湿度 / 露点 / 失败」等标签
-//   logisoso20_tn  : 只含数字/小数点/负号/冒号，用来显示大号数值
-//   helvB08_tf     : 含 Latin-1，有 ° 字形。
+//   wqy12_t_gb2312 : 点阵中文，显示「温度 / 湿度 / 体感 / 露点 / 失败」等标签
+//   logisoso16_tn  : 只含数字/小数点/负号/冒号，显示温度/湿度数值（数字实际高 16px）
+//   helvB08_tf     : 含 Latin-1，有 ° 字形，用作单位。
 //                    ⚠️ 必须是 _tf 不能是 _tr —— _tr 只有 ASCII，没有 °，会直接画不出来
+// 数值字号想再调就换这一行：logisoso18_tn(18px) / logisoso20_tn(21px) 更大。
 const uint8_t* const FONT_CN = u8g2_font_wqy12_t_gb2312;
-const uint8_t* const FONT_BIG = u8g2_font_logisoso20_tn;
+const uint8_t* const FONT_BIG = u8g2_font_logisoso16_tn;
 const uint8_t* const FONT_UNIT = u8g2_font_helvB08_tf;
 
 // 构造参数顺序是 (rotation, reset, clock, data)：clock 传 SCL、data 传 SDA。
@@ -105,10 +106,10 @@ void render() {
 
   // ---- 第一行：标签 + 右上角状态 ----
   // 布局基线取自字体的真实度量（u8g2 字体头部）：
-  //   logisoso20_tn 数字高 21px（基线 38 -> 占 y=17~38）
+  //   logisoso16_tn 数字高 16px（基线 38 -> 占 y=22~38）
   //   wqy12 中文高 13px（基线 12 -> 占 y=0~13；基线 62 -> 占 y=50~63）
-  // 两行大数字需要 42px + 两行中文标签 26px = 68px，超过屏高 64px，
-  // 所以只让温度/湿度用大字，体感/露点并到小字一行，主次分明还塞得下。
+  // 换成 16px 后四行也放得下了（2×16 + 2×13 = 58px < 64px），
+  // 但仍保留主次：温度/湿度用大字，体感/露点并到小字一行，一屏四个值齐全又不挤。
   s_oled.setFont(FONT_CN);
   s_oled.drawUTF8(2, 12, "温度");
   s_oled.drawUTF8(66, 12, "湿度");
