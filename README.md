@@ -1,7 +1,10 @@
 # DHT11
 
 ESP32 上读 DHT11 温湿度、并把结果显示到 **SSD1306 OLED** 的 PlatformIO 工程（Arduino 框架），
-与同级 `led` / `wifi` 项目同款板子、同款 framework 版本、同款代码组织方式。
+与同级 `led` / `wifi` 项目同款板子、同款 framework 版本。
+
+代码按功能拆成模块（配置 / 传感器 / 显示 / LED / 统计），`main.cpp` 只留启动顺序和采样排期，
+详见下文「[代码结构](#代码结构模块划分)」。
 
 ## 硬件
 
@@ -17,7 +20,7 @@ ESP32 上读 DHT11 温湿度、并把结果显示到 **SSD1306 OLED** 的 Platfo
 | 状态 LED | **GPIO 2 板载 LED**（多数 ESP32 开发板如此，无需外接元件） |
 | 下载口 | 板载 USB-UART 桥（macOS 上枚举为 `/dev/cu.usbserial-*`） |
 | 采样间隔 | 5s（DHT11 物理上限约 1 Hz） |
-| 固件占用 | Flash 39.1%（约 501 KB / 1280 KB），其中中文点阵字库 198 KB |
+| 固件占用 | Flash 39.2%（约 501 KB / 1280 KB），其中中文点阵字库 198 KB |
 
 > ⚠️ DHT11 的 DATA 是「主机拉低 → 释放 → 传感器回数据」的准双向口，必须接在**能输出**的脚上。
 > 经典 ESP32 的 **GPIO 34~39 是输入专用脚**，驱动不了起始信号，别拿来接 DATA。
@@ -102,29 +105,34 @@ LED(GPIO2): 成功短闪 50ms / 连续失败3次后 100ms 快闪
 [dht11]       温度 23.0~25.0 °C   湿度 45.0~47.0 %RH
 ```
 
-### 可调常量（`src/main.cpp` 顶部）
+### 可调常量（`include/config.h`）
+
+所有引脚、周期、阈值集中在**一个文件**里，其它模块只引用不硬编码，换硬件只改这一处：
 
 ```cpp
-static const uint8_t DHT_PIN = 4;                 // DHT11 DATA 脚
-static const uint32_t READ_INTERVAL_MS = 5000;    // 采样间隔(会自动放大到不低于物理下限)
-static const uint32_t STARTUP_DELAY_MS = 1200;    // 上电后首次采样的等待(DHT11 需约 1s 稳定)
-static const uint32_t LED_OK_FLASH_MS = 50;       // 成功读数: 亮 50ms
-static const uint32_t LED_FAIL_HALF_MS = 100;     // 失败告警: 亮100/灭100
-static const uint8_t  FAIL_BLINK_AFTER = 3;       // 连续失败几次开始快闪
-static const uint32_t STATS_INTERVAL_MS = 60000;  // 汇总行间隔
-static const bool LED_ACTIVE_HIGH = true;         // 板载 LED 亮灭相反就改为 false
+constexpr uint8_t  DHT_PIN = 4;               // DHT11 DATA 脚
+constexpr uint32_t READ_INTERVAL_MS = 5000;   // 采样间隔(会自动放大到不低于物理下限)
+constexpr uint32_t STARTUP_DELAY_MS = 1200;   // 上电后首次采样的等待(DHT11 需约 1s 稳定)
 
-static const uint8_t OLED_SDA_PIN = 21;           // OLED SDA
-static const uint8_t OLED_SCL_PIN = 22;           // OLED SCL
-static const uint32_t OLED_I2C_HZ = 400000;       // SSD1306 支持 400kHz
-static const uint32_t OLED_RETRY_MS = 30000;      // 没认到屏幕时每 30s 重试初始化
+constexpr uint8_t  LED_PIN = 2;               // 板载 LED
+constexpr bool     LED_ACTIVE_HIGH = true;    // 板载 LED 亮灭相反就改为 false
+constexpr uint32_t LED_OK_FLASH_MS = 50;      // 成功读数短闪
+constexpr uint32_t LED_FAIL_HALF_MS = 100;    // 失败告警半周期
+constexpr uint8_t  FAIL_BLINK_AFTER = 3;      // 连续失败几次开始快闪
+
+constexpr uint8_t  OLED_SDA_PIN = 21;         // OLED SDA
+constexpr uint8_t  OLED_SCL_PIN = 22;         // OLED SCL
+constexpr uint32_t OLED_I2C_HZ = 400000;      // SSD1306 支持 400kHz
+constexpr uint32_t OLED_RETRY_MS = 30000;     // 没认到屏幕时每 30s 重试初始化
+
+constexpr uint32_t STATS_INTERVAL_MS = 60000; // 汇总行间隔
 ```
 
-**换屏幕型号 / 尺寸**只要改 `src/main.cpp` 里那一行构造器，其余代码不用动：
+「换屏幕型号 / 尺寸」改的是 `src/oled_display.cpp` 里那一行构造器：
 
 ```cpp
 // 当前：SSD1306 128x64
-static U8G2_SSD1306_128X64_NONAME_F_HW_I2C s_oled(U8G2_R0, U8X8_PIN_NONE, OLED_SCL_PIN, OLED_SDA_PIN);
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C s_oled(U8G2_R0, U8X8_PIN_NONE, OLED_SCL_PIN, OLED_SDA_PIN);
 // 0.91" 128x32：换成 U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C
 // 1.3" SH1106 ：换成 U8G2_SH1106_128X64_NONAME_F_HW_I2C
 // 旋转 180° ：把第一个参数 U8G2_R0 改成 U8G2_R2
@@ -133,8 +141,41 @@ static U8G2_SSD1306_128X64_NONAME_F_HW_I2C s_oled(U8G2_R0, U8X8_PIN_NONE, OLED_S
 > 构造器参数顺序是 `(rotation, reset, clock, data)` —— **先 clock(SCL) 后 data(SDA)**，别写反。
 > U8g2 收到这两个脚后会自己调 `Wire.begin(data, clock)`，所以引脚只在这里给一次。
 
-**换传感器型号**：把 `setup()` 里的 `DHTesp::DHT11` 改成 `DHTesp::DHT22`（AM2302 / RHT03 同 DHT22）。
-型号选错会一直 `CHECKSUM`，因为两者的数据格式不同。
+「换传感器型号」改的是 `src/dht_sensor.cpp` 里的 `DHTesp::DHT11`，改成 `DHTesp::DHT22`
+（AM2302 / RHT03 同 DHT22）。型号选错会一直 `CHECKSUM`，因为两者的数据格式不同。
+
+## 代码结构（模块划分）
+
+`main.cpp` 只负责**启动顺序**和**采样排期**，硬件操作都在各自模块里：
+
+| 文件 | 职责 | 依赖 |
+|---|---|---|
+| `include/config.h` | 引脚、周期、阈值 —— 唯一配置入口 | — |
+| `include/reading.h` | 一次读数的数据结构（温度/湿度/体感/露点） | — |
+| `include/dht_sensor.h` + `src/dht_sensor.cpp` | DHT11 驱动：读一次、算体感与露点、打印读数行 | DHTesp、config |
+| `include/oled_display.h` + `src/oled_display.cpp` | SSD1306：I2C 扫描、地址自适应、三行布局、脏标记刷屏、掉线重试 | U8g2、Wire、config、reading |
+| `include/led_indicator.h` + `src/led_indicator.cpp` | 板载 LED：成功短闪 / 连续失败快闪，全程非阻塞 | config |
+| `include/stats.h` + `src/stats.cpp` | 运行统计：成功/失败计数、连续失败、极值、周期汇总 | config |
+| `src/main.cpp` | 启动顺序 + 采样排期（约 120 行） | 以上全部 |
+
+**依赖方向恒为 `main → 各模块 → config/reading`，模块之间互不依赖**：
+显示模块不认识 DHT 驱动，LED 不认识统计，全部通过 `main.cpp` 串联。
+所以换屏不用碰传感器代码，换传感器不用碰显示代码。
+
+几个刻意的接口设计：
+
+- `sensor::read(Reading&)` 用出参 + 返回 `Status`，调用方拿不到「半个读数」；
+- `oled::update(...)` 只打脏标记，真正绘制统一在 `oled::task()` 里做，
+  调用方只管喂数据，不用关心什么时候刷屏；
+- `led::task(now, failStreak)` 只接收「连续失败次数」这个数字，
+  内部自己跟阈值比较，不关心失败原因；
+- `stats::task(now, lastError)` 内部自己判断汇总间隔，main 里不用再管计时。
+
+`include/` 目录 PlatformIO 默认就在头文件搜索路径里
+（实测编译参数含 `-Iinclude`、`-Isrc`），所以直接 `#include "config.h"` 即可，
+`platformio.ini` 不需要额外的 `build_flags`。
+
+行为与拆分前**完全一致**（纯结构调整）：编译后 Flash 从 512849 变 513441 字节，只多了约 0.6KB。
 
 ## 构建 / 烧录 / 看串口
 
@@ -257,7 +298,7 @@ U8g2 这个 13.5MB 的包直连要 6 分钟以上，走代理 20 秒。
    中文标签和数字大字不用自己做字模；
 3. 内置 I2C 地址设置接口，配合启动扫描能同时兼容 0x3C / 0x3D 模块。
 
-**Flash 占用**：约 501 KB / 1280 KB（39.1%）。其中：
+**Flash 占用**：约 501 KB / 1280 KB（39.2%）。其中：
 中文点阵 `u8g2_font_wqy12_t_gb2312` **198 KB**、单位字体 `helvB08_tf` 2.1 KB、
 数字字体 `logisoso20_tn` 0.4 KB、U8g2 代码本体约 30 KB。
 如果哪天要省空间，把中文标签换成英文（用 `u8g2_font_6x12_tf` 之类）能省掉这 198 KB。
@@ -277,10 +318,39 @@ U8g2 这个 13.5MB 的包直连要 6 分钟以上，走代理 20 秒。
 ```
 DHT11/
 ├── platformio.ini          # 板型/框架/库依赖(DHTesp + U8g2)/串口监视器配置
-├── src/main.cpp            # 全部逻辑（采样排期 + OLED 绘制 + LED + 统计）
-├── include/                # 本项目头文件目录（暂无内容）
+├── include/                # 模块接口 + 配置（PlatformIO 默认已在 -I 路径里）
+│   ├── config.h            #   引脚、周期、阈值（唯一配置入口）
+│   ├── reading.h           #   一次读数的数据结构（传感器与显示共享）
+│   ├── dht_sensor.h        #   DHT11 模块接口
+│   ├── oled_display.h      #   OLED 显示模块接口
+│   ├── led_indicator.h     #   板载 LED 模块接口
+│   ├── stats.h             #   运行统计模块接口
+│   └── README              #   PlatformIO 自动生成的目录说明（保留）
+├── src/                    # 模块实现 + 应用入口
+│   ├── main.cpp            #   启动顺序 + 采样排期（只做编排，约 120 行）
+│   ├── dht_sensor.cpp      #   DHT11 驱动（DHTesp 封装）
+│   ├── oled_display.cpp    #   SSD1306 绘制（U8g2）
+│   ├── led_indicator.cpp   #   板载 LED 状态指示
+│   └── stats.cpp           #   计数 / 极值 / 周期汇总
 ├── lib/                    # 本项目私有库目录（暂无内容）
 ├── test/                   # PlatformIO 单元测试目录（暂无内容）
 ├── .vscode/                # PlatformIO IDE 的调试/推荐插件配置
 └── README.md
 ```
+
+各文件行数（重构后，共约 730 行）：
+
+```
+include/reading.h          14
+include/led_indicator.h    26
+include/oled_display.h     34
+include/stats.h            34
+include/config.h           36
+include/dht_sensor.h       42
+src/led_indicator.cpp      61
+src/dht_sensor.cpp         86
+src/stats.cpp              86
+src/main.cpp              124   ← 重构前是 370 行
+src/oled_display.cpp      185
+```
+
