@@ -71,6 +71,19 @@ void drawRight(uint8_t baseline, const char* text) {
   s_oled.drawUTF8((uint8_t)(OLED_WIDTH - w - 1), baseline, text);
 }
 
+// 小号「中文标签 + 数值」对，共用一条基线（底行放体感 / 露点用）
+void drawSmallPair(uint8_t x, uint8_t baseline, const char* label, float value, const char* unit) {
+  char buf[24];
+
+  s_oled.setFont(FONT_CN);
+  s_oled.drawUTF8(x, baseline, label);
+  const uint8_t w = (uint8_t)s_oled.getUTF8Width(label);
+
+  s_oled.setFont(FONT_UNIT);
+  snprintf(buf, sizeof(buf), "%.1f%s", value, unit);
+  s_oled.drawStr((uint8_t)(x + w + 2), baseline, buf);
+}
+
 void render() {
   if (!s_ready) {
     return;
@@ -90,36 +103,39 @@ void render() {
     return;
   }
 
-  // ---- 第一行：标签 ----
+  // ---- 第一行：标签 + 右上角状态 ----
+  // 布局基线取自字体的真实度量（u8g2 字体头部）：
+  //   logisoso20_tn 数字高 21px（基线 38 -> 占 y=17~38）
+  //   wqy12 中文高 13px（基线 12 -> 占 y=0~13；基线 62 -> 占 y=50~63）
+  // 两行大数字需要 42px + 两行中文标签 26px = 68px，超过屏高 64px，
+  // 所以只让温度/湿度用大字，体感/露点并到小字一行，主次分明还塞得下。
   s_oled.setFont(FONT_CN);
   s_oled.drawUTF8(2, 12, "温度");
   s_oled.drawUTF8(66, 12, "湿度");
+  if (s_failStreak >= FAIL_BLINK_AFTER) {
+    drawRight(12, "异常");  // 失败详情在底行，这里只给个提示
+  } else if (s_failStreak > 0) {
+    snprintf(buf, sizeof(buf), "失败%u", (unsigned)s_failStreak);
+    drawRight(12, buf);
+  } else {
+    drawRight(12, "正常");
+  }
 
-  // ---- 第二行：大号数值 + 单位 ----
+  // ---- 第二行：温度 / 湿度 大字 ----
   snprintf(buf, sizeof(buf), "%.1f", s_reading.temperature);
   drawValue(2, 38, buf, "°C");
   snprintf(buf, sizeof(buf), "%.1f", s_reading.humidity);
   drawValue(66, 38, buf, "%");
 
-  // ---- 第三行：露点 / 失败状态 ----
+  // ---- 第三行：体感 / 露点小字；连续失败时改为失败详情 ----
   if (s_failStreak >= FAIL_BLINK_AFTER) {
-    // 连续失败：上面的数值已经是旧值，底部直接把原因和次数写清楚
+    // 上面的数值已经是旧值，底行直接把原因和次数写清楚
     snprintf(buf, sizeof(buf), "失败%u次 %s", (unsigned)s_failStreak, s_lastError);
     s_oled.setFont(FONT_CN);
     s_oled.drawUTF8(2, 62, buf);
   } else {
-    s_oled.setFont(FONT_CN);
-    s_oled.drawUTF8(2, 62, "露点");
-    s_oled.setFont(FONT_UNIT);
-    snprintf(buf, sizeof(buf), "%.1f°C", s_reading.dewPoint);
-    s_oled.drawStr(30, 62, buf);
-
-    if (s_failStreak > 0) {
-      snprintf(buf, sizeof(buf), "失败%u", (unsigned)s_failStreak);
-      drawRight(62, buf);
-    } else {
-      drawRight(62, "正常");
-    }
+    drawSmallPair(2, 62, "体感", s_reading.heatIndex, "°C");
+    drawSmallPair(66, 62, "露点", s_reading.dewPoint, "°C");
   }
 
   s_oled.sendBuffer();
