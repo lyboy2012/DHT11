@@ -14,7 +14,8 @@ namespace {
 //   wqy12_t_gb2312 : 点阵中文，显示「温度 / 湿度 / 体感 / 露点 / 失败」等标签
 //   logisoso16_tn  : 只含数字/小数点/负号/冒号，显示温度/湿度数值（数字实际高 16px）
 //   helvB08_tf     : 含 Latin-1，有 ° 字形，用作单位。
-//                    ⚠️ 必须是 _tf 不能是 _tr —— _tr 只有 ASCII，没有 °，会直接画不出来
+//                    想画 ° 必须**两个条件同时满足**：字体含 Latin-1 字形（_tf，不是 _tr）
+//                    + 用 drawUTF8() 画（用 drawStr 会按字节把 UTF-8 的 C2 B0 拆成 Â 和 °）
 // 数值字号想再调就换这一行：logisoso18_tn(18px) / logisoso20_tn(21px) 更大。
 const uint8_t* const FONT_CN = u8g2_font_wqy12_t_gb2312;
 const uint8_t* const FONT_BIG = u8g2_font_logisoso16_tn;
@@ -57,12 +58,16 @@ uint8_t i2cScan() {
 // 画「大号数字 + 小号单位」，返回右边缘的 x
 uint8_t drawValue(uint8_t x, uint8_t baseline, const char* num, const char* unit) {
   s_oled.setFont(FONT_BIG);
-  s_oled.drawStr(x, baseline, num);
+  s_oled.drawStr(x, baseline, num);  // 数字是纯 ASCII，drawStr 即可
   const uint8_t w = (uint8_t)s_oled.getStrWidth(num);
 
+  // ⚠️ 单位必须用 drawUTF8 + getUTF8Width，不能用 drawStr/getStrWidth：
+  //   源码里的 "°" 是 UTF-8 两字节 C2 B0，而 drawStr 是按字节查表的，
+  //   会先命中 Latin-1 的 0xC2 = 'Â'（8px 下看着就是个 A），再命中 0xB0 = '°'，
+  //   屏幕上就变成「Â°C」——多出一个 A。drawUTF8 才会把 C2 B0 正确解码成 U+00B0。
   s_oled.setFont(FONT_UNIT);
-  s_oled.drawStr((uint8_t)(x + w + 1), baseline, unit);
-  return (uint8_t)(x + w + 1 + s_oled.getStrWidth(unit));
+  s_oled.drawUTF8((uint8_t)(x + w + 1), baseline, unit);
+  return (uint8_t)(x + w + 1 + s_oled.getUTF8Width(unit));
 }
 
 // 右下角右对齐的小字
@@ -72,7 +77,12 @@ void drawRight(uint8_t baseline, const char* text) {
   s_oled.drawUTF8((uint8_t)(OLED_WIDTH - w - 1), baseline, text);
 }
 
-// 小号「中文标签 + 数值」对，共用一条基线（底行放体感 / 露点用）
+// 小号「中文标签 + 数值 + 单位」对，共用一条基线（底行放体感 / 露点用）
+// 底行要塞两组内容、宽度很紧（实测右格到屏边只剩 1~2px），所以有两条约束：
+//   1) 单位必须走 drawUTF8 —— 原因见 drawValue：源码里的 "°" 是 UTF-8 两字节 C2 B0，
+//      用 drawStr 按字节查表会画成「Â°」，屏幕上多一个像 A 的字符；
+//   2) 数值最多占 4 个字符（"10.0"）。极冷极干时露点会出现 "-16.1" 这种 5 字符，
+//      会把 °C 顶出屏幕，所以超过 4 字符就退回整数格式（"-16"），最多省 9px。
 void drawSmallPair(uint8_t x, uint8_t baseline, const char* label, float value, const char* unit) {
   char buf[24];
 
@@ -80,9 +90,15 @@ void drawSmallPair(uint8_t x, uint8_t baseline, const char* label, float value, 
   s_oled.drawUTF8(x, baseline, label);
   const uint8_t w = (uint8_t)s_oled.getUTF8Width(label);
 
+  snprintf(buf, sizeof(buf), "%.1f", value);
+  if (strlen(buf) > 4) {
+    snprintf(buf, sizeof(buf), "%.0f", value);
+  }
+
   s_oled.setFont(FONT_UNIT);
-  snprintf(buf, sizeof(buf), "%.1f%s", value, unit);
-  s_oled.drawStr((uint8_t)(x + w + 2), baseline, buf);
+  s_oled.drawStr((uint8_t)(x + w + 1), baseline, buf);  // 数字是纯 ASCII
+  const uint8_t nw = (uint8_t)s_oled.getStrWidth(buf);
+  s_oled.drawUTF8((uint8_t)(x + w + 1 + nw), baseline, unit);
 }
 
 void render() {
